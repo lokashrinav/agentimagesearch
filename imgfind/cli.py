@@ -36,6 +36,7 @@ def search(
     license: Optional[str] = typer.Option(None, "--license", "-l", help="License filter (any,cc,royalty_free,public_domain)"),
     min_res: int = typer.Option(1024, "--min-res", help="Minimum resolution (long edge px)"),
     fast: bool = typer.Option(False, "--fast", help="Skip ML ranking, resolution filter only"),
+    quality: bool = typer.Option(False, "--quality", "-q", help="Enable SigLIP aesthetic scoring (slow, higher quality)"),
     no_vision: bool = typer.Option(False, "--no-vision", help="Skip vision LLM re-ranking"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
     grid: bool = typer.Option(False, "--grid", help="Open grid UI in browser"),
@@ -62,6 +63,7 @@ def search(
         min_resolution=min_res,
         skip_ranking=fast,
         skip_vision=no_vision,
+        quality=quality,
         fast=fast,
     ))
 

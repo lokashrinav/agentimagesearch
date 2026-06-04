@@ -29,6 +29,7 @@ async def discover(
     min_resolution: int | None = None,
     skip_ranking: bool = False,
     skip_vision: bool = False,
+    quality: bool = False,
     fast: bool = False,
 ) -> SearchResult:
     n = n or config.default_n
@@ -70,7 +71,7 @@ async def discover(
     else:
         pipeline = RankingPipeline(
             skip_clip=fast,
-            skip_aesthetic=fast,
+            skip_aesthetic=not quality,
             skip_technical=True,
             skip_vision=skip_vision or fast,
             skip_dedup=fast,

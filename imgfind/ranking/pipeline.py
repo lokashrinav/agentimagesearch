@@ -14,7 +14,7 @@ class RankingPipeline:
     def __init__(
         self,
         skip_clip: bool = False,
-        skip_aesthetic: bool = False,
+        skip_aesthetic: bool = True,
         skip_technical: bool = True,
         skip_vision: bool = False,
         skip_dedup: bool = False,
@@ -52,8 +52,13 @@ class RankingPipeline:
 
         if not self.skip_aesthetic:
             from imgfind.ranking.aesthetic import score_aesthetic
-            result = await score_aesthetic(result)
-            logger.info("Aesthetic scoring complete")
+            # Only aesthetic-score the top candidates by CLIP relevance
+            # to avoid running SigLIP on images that won't rank anyway.
+            result.sort(key=lambda c: c.relevance_score, reverse=True)
+            aesthetic_k = min(len(result), max(20, config.default_n * 3))
+            top = await score_aesthetic(result[:aesthetic_k])
+            result = top + result[aesthetic_k:]
+            logger.info("Aesthetic scoring complete (%d/%d scored)", aesthetic_k, len(result))
 
         if not self.skip_technical:
             from imgfind.ranking.technical import score_technical
