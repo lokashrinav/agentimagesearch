@@ -57,6 +57,11 @@ async def discover(
 
     logger.info("Collected %d raw candidates from %d sources", len(all_candidates), len(tasks))
 
+    before = len(all_candidates)
+    all_candidates = [c for c in all_candidates if not _is_unfetchable(c.url)]
+    if len(all_candidates) < before:
+        logger.info("Dropped %d unfetchable candidates (walled gardens)", before - len(all_candidates))
+
     if license_filter:
         all_candidates = _apply_license_preference(all_candidates, license_filter)
 
@@ -174,6 +179,21 @@ def _build_tasks(
 
 async def _make_direct_candidate(url: str) -> list[Candidate]:
     return [Candidate(url=url, source="direct", source_page=url)]
+
+
+_UNFETCHABLE_HOSTS = {
+    "lookaside.fbsbx.com",
+    "lookaside.instagram.com",
+    "scontent.cdninstagram.com",
+    "scontent-",
+    "fbcdn.net",
+}
+
+
+def _is_unfetchable(url: str) -> bool:
+    from urllib.parse import urlparse
+    host = urlparse(url).hostname or ""
+    return any(host == h or host.endswith("." + h) or h in host for h in _UNFETCHABLE_HOSTS)
 
 
 def _apply_license_preference(candidates: list[Candidate], license_filter: str) -> list[Candidate]:

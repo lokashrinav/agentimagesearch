@@ -10,7 +10,9 @@ from typing import Optional
 import typer
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path, encoding="utf-8-sig")
 
 app = typer.Typer(
     name="imgfind",

@@ -79,6 +79,11 @@ class Database:
         row = self.conn.execute(
             "SELECT * FROM candidates WHERE id = ?", (candidate_id,)
         ).fetchone()
+        if not row and len(candidate_id) >= 4:
+            row = self.conn.execute(
+                "SELECT * FROM candidates WHERE id LIKE ? LIMIT 1",
+                (candidate_id + "%",),
+            ).fetchone()
         if not row:
             return None
         return self._row_to_candidate(row)
