@@ -152,8 +152,8 @@ def _build_tasks(
 
     elif strategy == Strategy.GALLERY_DL:
         gdl = GalleryDLSource()
-        if gdl.available() and url:
-            tasks.append(gdl.search(query, n, url=url))
+        if gdl.available():
+            tasks.append(gdl.search(query, n, **kwargs))
 
     elif strategy == Strategy.DRIVE:
         drive = DriveSource()

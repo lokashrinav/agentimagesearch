@@ -41,7 +41,11 @@ async def score_relevance(candidates: list[Candidate], query: str) -> list[Candi
         text_features = _model.encode_text(text_tokens)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-    for candidate in candidates:
+    # Collect all valid images and preprocess into a single batch
+    valid_indices: list[int] = []
+    tensors: list[torch.Tensor] = []
+
+    for i, candidate in enumerate(candidates):
         img = await image_cache.get(candidate.url)
         if img is None:
             candidate.relevance_score = 0.0
@@ -50,12 +54,17 @@ async def score_relevance(candidates: list[Candidate], query: str) -> list[Candi
         if candidate.width == 0:
             candidate.width, candidate.height = img.size
 
-        img_tensor = _preprocess(img).unsqueeze(0).to(device)
-        with torch.no_grad():
-            img_features = _model.encode_image(img_tensor)
-            img_features = img_features / img_features.norm(dim=-1, keepdim=True)
-            similarity = (img_features @ text_features.T).item()
+        tensors.append(_preprocess(img).unsqueeze(0))
+        valid_indices.append(i)
 
-        candidate.relevance_score = max(0.0, similarity)
+    if tensors:
+        batch = torch.cat(tensors, dim=0).to(device)
+        with torch.no_grad():
+            img_features = _model.encode_image(batch)
+            img_features = img_features / img_features.norm(dim=-1, keepdim=True)
+            similarities = (img_features @ text_features.T).squeeze(-1)
+
+        for j, idx in enumerate(valid_indices):
+            candidates[idx].relevance_score = max(0.0, similarities[j].item())
 
     return candidates

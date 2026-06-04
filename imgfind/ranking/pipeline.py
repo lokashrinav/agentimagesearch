@@ -36,6 +36,9 @@ class RankingPipeline:
         result = self._filter_resolution(result)
         logger.info("After resolution filter: %d candidates", len(result))
 
+        await image_cache.prefetch([c.url for c in result])
+        logger.info("Image prefetch complete for %d candidates", len(result))
+
         if not self.skip_dedup:
             from imgfind.ranking.dedup import deduplicate
             result = await deduplicate(result)

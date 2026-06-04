@@ -24,7 +24,7 @@ def _load():
         logger.warning("aesthetic-predictor-v2-5 not installed, scores will be 0")
 
 
-async def score_aesthetic(candidates: list[Candidate]) -> list[Candidate]:
+async def score_aesthetic(candidates: list[Candidate], batch_size: int = 8) -> list[Candidate]:
     if not candidates:
         return candidates
 
@@ -37,16 +37,29 @@ async def score_aesthetic(candidates: list[Candidate]) -> list[Candidate]:
     import torch
     device = next(model.parameters()).device
 
-    for candidate in candidates:
+    valid_indices: list[int] = []
+    images = []
+
+    for i, candidate in enumerate(candidates):
         img = await image_cache.get(candidate.url)
         if img is None:
             candidate.aesthetic_score = 0.0
             continue
+        images.append(img)
+        valid_indices.append(i)
 
-        inputs = preprocessor(images=img, return_tensors="pt").to(device)
+    for batch_start in range(0, len(images), batch_size):
+        batch_imgs = images[batch_start:batch_start + batch_size]
+        batch_indices = valid_indices[batch_start:batch_start + batch_size]
+
+        inputs = preprocessor(images=batch_imgs, return_tensors="pt").to(device)
         with torch.no_grad():
-            score = model(**inputs).logits.squeeze().item()
+            scores = model(**inputs).logits.squeeze(-1)
 
-        candidate.aesthetic_score = max(0.0, min(10.0, score))
+        if scores.dim() == 0:
+            scores = scores.unsqueeze(0)
+
+        for j, idx in enumerate(batch_indices):
+            candidates[idx].aesthetic_score = max(0.0, min(10.0, scores[j].item()))
 
     return candidates
