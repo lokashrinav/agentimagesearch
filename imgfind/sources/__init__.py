@@ -4,9 +4,7 @@ from imgfind.sources.brave import BraveSource
 from imgfind.sources.gallery import GalleryDLSource
 from imgfind.sources.pexels import PexelsSource
 from imgfind.sources.wikimedia import WikimediaSource
-from imgfind.sources.drive import DriveSource
-from imgfind.sources.crawl import CrawlSource
-from imgfind.sources.browser import BrowserSource
+from imgfind.sources.duckduckgo import DuckDuckGoSource
 
 __all__ = [
     "Source",
@@ -15,7 +13,5 @@ __all__ = [
     "GalleryDLSource",
     "PexelsSource",
     "WikimediaSource",
-    "DriveSource",
-    "CrawlSource",
-    "BrowserSource",
+    "DuckDuckGoSource",
 ]

@@ -3,16 +3,94 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
+import httpx
+
 from imgfind.models import Candidate, LicenseType
 from imgfind.sources.base import Source
 
 logger = logging.getLogger(__name__)
+
+# ---------- Danbooru tag autocomplete helpers ----------
+
+_AUTOCOMPLETE_URL = "https://danbooru.donmai.us/autocomplete.json"
+# Words that don't map to useful Danbooru tags on their own.
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "of", "in", "on", "at", "to", "for", "and", "or",
+    "with", "from", "by", "is", "it", "as", "be", "was", "are", "this",
+    "that", "but", "not", "no", "so", "if", "my", "your",
+})
+
+
+async def autocomplete_tags(query: str) -> list[str]:
+    """Hit the Danbooru autocomplete endpoint and return tag names sorted by
+    post count (descending).  Returns up to 5 results."""
+    async with httpx.AsyncClient(timeout=10, headers={"User-Agent": "imgfind/0.1"}) as client:
+        resp = await client.get(
+            _AUTOCOMPLETE_URL,
+            params={
+                "search[query]": query,
+                "search[type]": "tag_query",
+                "limit": 5,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    # Each entry has "label" (display name), "value" (tag), and "post_count".
+    sorted_entries = sorted(data, key=lambda e: e.get("post_count", 0), reverse=True)
+    return [entry["value"] for entry in sorted_entries]
+
+
+async def expand_query(query: str) -> str:
+    """Turn a natural-language query into Danbooru tags via autocomplete.
+
+    Tries adjacent word pairs first (e.g. "Sans Undertale" -> sans_(undertale)),
+    then individual words for anything not covered by a pair.
+    """
+    words = re.findall(r"[A-Za-z0-9_]+", query)
+    words = [w for w in words if w.lower() not in _STOP_WORDS]
+    if not words:
+        return query.strip()
+
+    tags: list[str] = []
+    seen: set[str] = set()
+    consumed: set[int] = set()
+
+    pairs = [" ".join(words[i:i+2]) for i in range(len(words) - 1)]
+    pair_results = await asyncio.gather(
+        *[autocomplete_tags(p) for p in pairs], return_exceptions=True
+    )
+    for i, result in enumerate(pair_results):
+        if isinstance(result, Exception) or not result:
+            continue
+        tag = result[0]
+        if tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+            consumed.add(i)
+            consumed.add(i + 1)
+
+    remaining = [w for i, w in enumerate(words) if i not in consumed]
+    if remaining:
+        word_results = await asyncio.gather(
+            *[autocomplete_tags(w) for w in remaining], return_exceptions=True
+        )
+        for result in word_results:
+            if isinstance(result, Exception) or not result:
+                continue
+            tag = result[0]
+            if tag not in seen:
+                seen.add(tag)
+                tags.append(tag)
+
+    return " ".join(tags) if tags else query.strip()
 
 ART_HOSTS = {
     "pixiv.net", "danbooru.donmai.us", "artstation.com", "deviantart.com",
