@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Callable, Awaitable
 
 from imgfind.config import config
 from imgfind.models import Candidate
@@ -8,6 +9,8 @@ from imgfind.ranking import image_cache
 from imgfind.ranking.blend import blend_scores
 
 logger = logging.getLogger(__name__)
+
+VisionCallback = Callable[[str, bytes], Awaitable[str]]
 
 
 class RankingPipeline:
@@ -19,6 +22,7 @@ class RankingPipeline:
         skip_vision: bool = False,
         skip_dedup: bool = False,
         blend_method: str = "zscore",
+        vision: VisionCallback | None = None,
     ):
         self.skip_clip = skip_clip
         self.skip_aesthetic = skip_aesthetic
@@ -26,6 +30,7 @@ class RankingPipeline:
         self.skip_vision = skip_vision
         self.skip_dedup = skip_dedup
         self.blend_method = blend_method
+        self._vision = vision
 
     async def rank(self, candidates: list[Candidate], query: str) -> list[Candidate]:
         if not candidates:
@@ -67,10 +72,13 @@ class RankingPipeline:
 
         result = blend_scores(result, method=self.blend_method)
 
-        if not self.skip_vision and config.anthropic_key:
-            from imgfind.ranking.vision_rerank import vision_rerank
-            result = await vision_rerank(result, query)
-            logger.info("Vision re-rank complete")
+        if not self.skip_vision and (self._vision or config.anthropic_key):
+            from imgfind.ranking.grid_rerank import grid_rerank
+            result = await grid_rerank(
+                result, query,
+                vision=self._vision,
+            )
+            logger.info("Grid re-rank complete")
 
         image_cache.clear()
         return result

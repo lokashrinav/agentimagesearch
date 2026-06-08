@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Callable, Awaitable
 
 from imgfind.config import config
 from imgfind.models import Candidate, LicenseType, SearchResult, Strategy
-from imgfind.ranking.pipeline import RankingPipeline
-from imgfind.router import classify_query
+from imgfind.ranking.pipeline import RankingPipeline, VisionCallback
+from imgfind.router import route_query
 from imgfind.sources.brave import BraveSource
 from imgfind.sources.browser import BrowserSource
 from imgfind.sources.crawl import CrawlSource
@@ -31,19 +32,20 @@ async def discover(
     skip_vision: bool = False,
     quality: bool = False,
     fast: bool = False,
+    vision: VisionCallback | None = None,
 ) -> SearchResult:
     n = n or config.default_n
     if min_resolution:
         config.min_resolution = min_resolution
 
-    strategies = classify_query(query, url=url, license_filter=license_filter, sources=sources)
-    logger.info("Strategies: %s", [s.value for s in strategies])
+    route = route_query(query, url=url, license_filter=license_filter, sources=sources)
+    logger.info("Strategies: %s", [s.value for s in route.strategies])
 
     fetch_n = min(config.max_candidates, n * 5)
 
     tasks = []
-    for strategy in strategies:
-        tasks.extend(_build_tasks(strategy, query, url, fetch_n, license_filter))
+    for strategy in route.strategies:
+        tasks.extend(_build_tasks(strategy, query, url, fetch_n, license_filter, queries=route.queries))
 
     results = await asyncio.gather(*[t for t in tasks], return_exceptions=True)
 
@@ -75,6 +77,7 @@ async def discover(
             skip_technical=True,
             skip_vision=skip_vision or fast,
             skip_dedup=fast,
+            vision=vision,
         )
         ranked = await pipeline.rank(all_candidates, query)
         ranked = ranked[:n]
@@ -129,6 +132,7 @@ def _build_tasks(
     url: str | None,
     n: int,
     license_filter: str | None,
+    queries: dict[str, str | None] | None = None,
 ) -> list:
     tasks = []
     kwargs: dict = {}
@@ -141,20 +145,25 @@ def _build_tasks(
         serpapi = SerpAPISource()
         brave = BraveSource()
         if serpapi.available():
-            tasks.append(serpapi.search(query, n, **kwargs))
+            q = (queries or {}).get("serpapi") or query
+            tasks.append(serpapi.search(q, n, **kwargs))
         if brave.available():
-            tasks.append(brave.search(query, n, **kwargs))
+            q = (queries or {}).get("brave") or query
+            tasks.append(brave.search(q, n, **kwargs))
 
     elif strategy == Strategy.STOCK_API:
-        for source_cls in [PexelsSource, WikimediaSource]:
+        for source_cls, name in [(PexelsSource, "pexels"), (WikimediaSource, "wikimedia")]:
             source = source_cls()
             if source.available():
-                tasks.append(source.search(query, n, **kwargs))
+                q = (queries or {}).get(name) or query
+                if q:
+                    tasks.append(source.search(q, n, **kwargs))
 
     elif strategy == Strategy.GALLERY_DL:
         gdl = GalleryDLSource()
         if gdl.available():
-            tasks.append(gdl.search(query, n, **kwargs))
+            q = (queries or {}).get("gallery-dl") or query
+            tasks.append(gdl.search(q, n, **kwargs))
 
     elif strategy == Strategy.DRIVE:
         drive = DriveSource()
