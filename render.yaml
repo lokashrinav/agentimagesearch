@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: agentimagesearch
+    runtime: docker
+    plan: free
+    envVars:
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: BRAVE_API_KEY
+        sync: false
+      - key: PEXELS_API_KEY
+        sync: false
