@@ -1,171 +1,107 @@
 # imgfind
 
-Autonomous image discovery and retrieval agent. Searches across multiple sources, ranks candidates using CLIP relevance + aesthetic scoring + perceptual dedup, and presents a ranked shortlist or auto-picks the best match.
+**Image search for AI agents that actually see what they recommend.**
+
+AI assistants search for images blind. They read titles and URLs but never look at the actual pictures. So they recommend paywalled images, wrong backgrounds, pixel art when you wanted illustration, dead links. You only find out after downloading.
+
+imgfind fixes this. Search multiple backends, composite the top candidates into a single labeled grid, and let your AI agent visually compare and rank them. The same way you'd scan a contact sheet.
 
 ## How it works
 
 ```
-query → router (classify) → [SerpAPI ∥ Brave ∥ gallery-dl ∥ Pexels ∥ Wikimedia ∥ Drive ∥ Crawl4AI]
-      → candidate pool → resolution filter → phash dedup → CLIP relevance → aesthetic score
-      → z-score blend → vision LLM re-rank (optional) → ranked shortlist
+Your agent crafts search queries (multiple angles per backend)
+    -> imgfind searches Google, Brave, Danbooru, Pexels, Wikimedia in parallel
+    -> Downloads top candidates, composites into a labeled grid image
+    -> Your agent views the grid, visually ranks against your actual needs
+    -> Presents top picks with URLs and explanations
 ```
 
-**Router:** classifies your query (art keywords → gallery-dl + web, stock keywords → Pexels/Wikimedia, URL → auto-detect source type) and fans out to multiple backends in parallel.
+The AI agent is both the query planner and the visual ranker. No separate LLM API calls. No embeddings. Your agent just looks at the grid.
 
-**Ranking pipeline:**
-1. Hard filter on minimum resolution
-2. Perceptual hash dedup (imagehash, Hamming < 8)
-3. CLIP text-image relevance (open_clip ViT-B-32)
-4. Aesthetic quality (SigLIP-based aesthetic-predictor-v2-5, 1–10 scale)
-5. Z-score normalize + weighted blend (0.5 relevance / 0.3 aesthetic / 0.2 technical)
-6. Optional vision LLM re-rank on top-K (Claude Sonnet)
+## Why a grid?
 
-## Install
+Based on the [SQUARE paper](https://arxiv.org/abs/2503.15573). Comparing all candidates side-by-side in one image beats scoring them one at a time. One vision pass over a 2x5 grid is faster, cheaper, and more accurate than 10 separate image evaluations.
+
+- 384px thumbnails with LANCZOS resampling
+- Gray background (128,128,128) so you can tell white, black, and transparent backgrounds apart
+- Labeled A-J for easy reference
+
+## Multi-query branching
+
+One search query isn't enough. imgfind accepts multiple queries per backend. They all run in parallel, results get pooled and deduped into one grid:
 
 ```bash
-git clone https://github.com/shrinav/imgfind.git
+python -m imgfind.cc_search \
+  --query "Gojo Satoru" \
+  --google "Gojo Satoru digital art illustration high quality" \
+           "Gojo Satoru transparent background PNG render" \
+  --danbooru "gojo_satoru solo highres -lowres"
+```
+
+Different angles surface different results. The grid reranker picks the best from the combined pool.
+
+## Claude Code integration
+
+imgfind was built to work with [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Add instructions to your `CLAUDE.md` and Claude will use imgfind whenever you ask for an image:
+
+```markdown
+## imgfind
+When the user asks to find an image, use imgfind. Two steps:
+
+### Step 1: Search
+Craft search queries based on the conversation context.
+\```bash
+cd <path-to-imgfind> && PYTHONIOENCODING=utf-8 python -m imgfind.cc_search \
+  --query "base query" --google "angle 1" "angle 2" --brave "angle 3"
+\```
+Branch out with multiple search angles per backend.
+
+### Step 2: View + Rank
+Read the grid image at `<path-to-imgfind>/.imgfind_output/grid.jpg`.
+Rank candidates against the user's actual needs. Present top picks with URLs.
+```
+
+Claude Code reads the grid image directly. It sees the actual candidates and can judge backgrounds, art style, quality, and whether the image actually fits what you need.
+
+## Setup
+
+```bash
+git clone https://github.com/lokashrinav/imgfind.git
 cd imgfind
 pip install -e .
 ```
 
-For browser automation (JS-rendered galleries):
-```bash
-pip install -e ".[browser]"
-```
-
-## API Keys
-
-Create a `.env` file in the project root:
+Create a `.env` file:
 
 ```env
-# Required — primary search
-SERPAPI_API_KEY=your_key_here
-
-# Optional — more sources & features
-BRAVE_API_KEY=
-PEXELS_API_KEY=
-ANTHROPIC_API_KEY=       # for vision LLM re-ranking
-GOOGLE_API_KEY=          # for Google Drive folder traversal
+SERPAPI_API_KEY=your_key      # Required
+BRAVE_API_KEY=                # Optional, independent search index
+PEXELS_API_KEY=               # Optional, stock photos
 ```
 
-Only `SERPAPI_API_KEY` is needed to start. Each additional key unlocks more sources.
+Only `SERPAPI_API_KEY` is needed to start. Each additional key adds more backends.
 
-## Usage
+## Query syntax per backend
 
-### Search for images
+| Backend | Syntax | Example |
+|---------|--------|---------|
+| Google/Brave | Natural language, `-term` to exclude | `"Sans fan art -pixel_art -sprite"` |
+| Danbooru | Underscored tags, `-tag` to exclude | `"sans_(undertale) solo highres -lowres"` |
+| Pexels/Wikimedia | Simple keywords only | `"mountain landscape sunset"` |
 
-```bash
-imgfind search "cyberpunk cityscape" --n 10
-imgfind search "serene japanese garden" --license cc --n 5
-imgfind search "anime girl neon" --sources web,danbooru
-```
+## Backends
 
-### Extract images from a URL
+| Source | What it searches | Best for |
+|--------|-----------------|----------|
+| SerpAPI | Google Images | General search, broad coverage |
+| Brave | Independent index | Different results than Google |
+| Danbooru | Tagged art database | Anime, fan art, illustrations |
+| Pexels | Stock photos | Clean commercial-use photos |
+| Wikimedia | CC/public domain | Free-license images |
 
-```bash
-imgfind from-url "https://www.artstation.com/artwork/xyz"
-imgfind from-url "https://drive.google.com/drive/folders/abc123"
-```
+## Why this exists
 
-### Visual grid picker
-
-```bash
-imgfind search "mountain landscape" --grid
-```
-
-Opens a local web UI with thumbnails, score badges, and click-to-pick. Press 1–9 to quick-select.
-
-### Autonomous mode
-
-```bash
-imgfind auto "product photo of headphones" --out assets/ --format webp
-```
-
-Searches, ranks, auto-picks if confidence is high enough, downloads + optimizes, writes a sidecar JSON with source/license/attribution.
-
-### Download a specific candidate
-
-```bash
-imgfind fetch abc123def456 --out assets/ --width 1200 --format webp
-```
-
-### Rank local images
-
-```bash
-imgfind rank ./my-images/ --query "professional headshot"
-```
-
-### Tune ranking weights
-
-```bash
-imgfind tune
-```
-
-Fits blend weights from your pick history (recorded via grid UI).
-
-## Flags
-
-| Flag | Description |
-|------|-------------|
-| `--fast` | Skip ML ranking, resolution filter only |
-| `--no-vision` | Skip vision LLM re-ranking |
-| `--grid` | Open grid UI instead of terminal output |
-| `--json` | Output as JSON |
-| `--license cc\|royalty_free\|public_domain` | Prefer permissive sources |
-| `--sources web,pexels,wikimedia,...` | Explicit source selection |
-| `--min-res 1024` | Minimum resolution (long edge px) |
-| `-v` | Verbose logging |
-
-## Sources
-
-| Source | Type | License tracking |
-|--------|------|-----------------|
-| SerpAPI | Google Images | auto |
-| Brave Search | Independent index | auto |
-| gallery-dl | 170+ art sites (Pixiv, Danbooru, ArtStation, DeviantArt, Reddit, Twitter...) | flags copyrighted |
-| Pexels | Stock photos | Pexels license + attribution |
-| Wikimedia Commons | CC/public domain with per-file metadata | CC-BY/CC0/PD |
-| Google Drive | Folder traversal via API | unknown |
-| Crawl4AI | Generic HTML extraction | unknown |
-| browser-use | JS-rendered/login-gated (escalation) | unknown |
-
-## Architecture
-
-```
-imgfind/
-├── cli.py              # Typer CLI
-├── engine.py           # Orchestrator: router → sources → ranking → DB
-├── router.py           # Query classification → strategy dispatch
-├── models.py           # Candidate, SearchResult, LicenseType
-├── config.py           # Config from env vars + defaults
-├── feedback.py         # Preference-based weight tuning
-├── sources/            # One module per search backend
-├── ranking/
-│   ├── image_cache.py  # Download-once cache shared across scorers
-│   ├── clip_scorer.py  # CLIP text-image relevance
-│   ├── aesthetic.py    # SigLIP aesthetic predictor (1-10)
-│   ├── technical.py    # MUSIQ technical IQA (optional)
-│   ├── dedup.py        # Perceptual hash deduplication
-│   ├── vision_rerank.py # Claude vision re-ranking (top-K)
-│   ├── blend.py        # Z-score / RRF score blending
-│   └── pipeline.py     # Orchestrates the ranking stages
-├── storage/
-│   ├── db.py           # SQLite candidate cache + preferences
-│   └── assets.py       # Download, optimize, sidecar JSON, manifest
-└── ui/
-    ├── server.py       # FastAPI grid UI
-    ├── terminal.py     # Terminal shortlist printer
-    └── static/         # Dark-theme grid with score badges
-```
-
-## Cost
-
-| Component | Cost per search |
-|-----------|----------------|
-| SerpAPI | Free (100/month) |
-| Brave | ~$0.005 |
-| CLIP + aesthetic | Free (local) |
-| Vision re-rank | ~$0.03–0.10 (opt-in) |
+AI web search recommends images it has never seen. In testing, 3 out of 6 AI-recommended images for "Gojo Satoru" were broken. One was paywalled, one was a dead link, one had the wrong background color. imgfind catches all of these because the AI actually looks at the candidates before recommending them.
 
 ## License
 
