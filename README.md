@@ -73,6 +73,37 @@ Different angles surface different results. The grid shows the best from the com
 
 Danbooru has a built-in tag autocomplete API. Natural language like "Sans Undertale transparent background" gets converted to proper tags like `sans_(undertale) transparent_background` automatically.
 
+## Hosted API
+
+A free hosted API is live at `https://agentimagesearch.onrender.com`. No setup, no keys, just POST:
+
+```bash
+curl -X POST https://agentimagesearch.onrender.com/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "cute cat", "duckduckgo": ["cute cat photo", "kitten portrait"]}'
+```
+
+Returns candidate URLs, metadata, and a grid image you can fetch at `/grid/{search_id}`.
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /search` | Run a search. Pass `query` and optional backend-specific query lists |
+| `GET /grid/{search_id}` | Get the grid image for a specific search |
+| `GET /grid` | Get the most recent grid image |
+
+The API supports all the same backends as the CLI. DuckDuckGo works out of the box. To use Google/Brave/Pexels, set the corresponding API key env vars on your own deployment.
+
+## MCP server
+
+For AI agents that support MCP (Model Context Protocol), agentimagesearch exposes a `search_images` tool that returns both candidate metadata and the grid image inline:
+
+```bash
+pip install -e ".[mcp]"
+python -m imgfind.mcp_server
+```
+
+Add it to your MCP config and your agent gets image search with visual verification built in.
+
 ## AI agent integration
 
 agentimagesearch ships with a `CLAUDE.md` that tells Claude Code how to use it. Clone the repo and Claude Code knows:
